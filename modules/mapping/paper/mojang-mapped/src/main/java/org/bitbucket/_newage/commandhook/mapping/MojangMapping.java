@@ -2,6 +2,8 @@ package org.bitbucket._newage.commandhook.mapping;
 
 import com.mojang.brigadier.StringReader;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.arguments.selector.EntitySelectorParser;
 import net.minecraft.commands.arguments.selector.EntitySelector;
@@ -19,6 +21,36 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class MojangMapping extends AMapping {
+
+    // Cache the constructors in static variables
+    private static Constructor<EntitySelectorParser> twoArgConstructor; // 1.21.1 and above
+    private static Constructor<EntitySelectorParser> oneArgConstructor; // 1.21 and below
+
+    static {
+        try {
+            // Attempt to cache both constructors
+            twoArgConstructor = EntitySelectorParser.class.getConstructor(StringReader.class, boolean.class);
+        } catch (NoSuchMethodException e) {
+            // Handle the case where this constructor is missing
+            twoArgConstructor = null;
+        }
+
+        try {
+            oneArgConstructor = EntitySelectorParser.class.getConstructor(StringReader.class);
+        } catch (NoSuchMethodException e) {
+            // Handle the case where this constructor is missing
+            oneArgConstructor = null;
+        }
+    }
+
+    private static EntitySelectorParser createEntitySelectorParser(StringReader stringReader, Constructor<EntitySelectorParser> constructor, Object... args) {
+        try {
+            return constructor.newInstance(stringReader, args);
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException e) {
+            // Optionally, log the exception here if needed for debugging
+            return null;
+        }
+    }
 
     @Override
     public List<Entity> getEntitiesFromSelector(String selector, Block commandBlock) {
@@ -59,7 +91,18 @@ public class MojangMapping extends AMapping {
     @Override
     public EntitySelectorParser getArgumentParser(String selector) {
         StringReader stringReader = new StringReader(selector);
-        return new EntitySelectorParser(stringReader);
+
+        if (twoArgConstructor != null) {
+            EntitySelectorParser parser = createEntitySelectorParser(stringReader, twoArgConstructor, true);
+            if (parser != null) return parser;
+        }
+
+        if (oneArgConstructor != null) {
+            EntitySelectorParser parser = createEntitySelectorParser(stringReader, oneArgConstructor);
+            if (parser != null) return parser;
+        }
+
+        throw new RuntimeException("No valid constructor found for EntitySelectorParser.");
     }
 
     /**
